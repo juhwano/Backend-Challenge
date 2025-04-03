@@ -8,7 +8,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -73,27 +75,41 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
             
             log.info("법인 필터링 완료. 총 {}개의 법인이 발견되었습니다.", corporateEntities.size());
             
-            // 3. API 호출 테스트 - 첫 번째 엔티티만 사용하여 API 호출 테스트
-            if (!corporateEntities.isEmpty()) {
-                BusinessEntityDto testDto = corporateEntities.get(0);
-                log.info("API 테스트를 위한 샘플 데이터: {}", testDto);
-                
-                // 법인등록번호 조회 API 테스트 - getBusinessInfoByBusinessNumber 사용
-                Map<String, String> businessInfo = getBusinessInfoByBusinessNumber(testDto.getBusinessNumber());
-                String corporateRegistrationNumber = businessInfo.getOrDefault("corporateRegistrationNumber", "조회 실패");
-                log.info("법인등록번호 조회 결과: {}", corporateRegistrationNumber);
-                
-                // 행정구역코드 조회 API 테스트
-                String administrativeDistrictCode = getAdministrativeDistrictCode(testDto.getAddress());
-                log.info("행정구역코드 조회 결과: {}", administrativeDistrictCode);
-                
-                // 모든 엔티티에 대해 API 호출 결과 로깅 (실제 저장은 하지 않음)
-                testApiCallsForAllEntities(corporateEntities);
-                
-                return corporateEntities.size();
+            // 3. API를 통해 데이터 보강 및 엔티티 준비
+            List<BusinessEntity> enrichedEntities = enrichAndPrepareEntities(corporateEntities);
+            if (enrichedEntities.isEmpty()) {
+                log.info("보강된 엔티티가 없습니다.");
+                return 0;
             }
             
-            return 0;
+            log.info("데이터 보강 완료. 총 {}개의 엔티티가 준비되었습니다.", enrichedEntities.size());
+            
+            // 4. 데이터베이스에 저장 (개별 저장으로 변경)
+            int savedCount = 0;
+            for (BusinessEntity entity : enrichedEntities) {
+                try {
+                    // 중복 체크 한번 더 수행
+                    if (businessEntityRepository.existsByBusinessNumber(entity.getBusinessNumber())) {
+                        log.info("저장 직전 중복 체크: 이미 존재하는 사업자등록번호 {}, 건너뜁니다.", entity.getBusinessNumber());
+                        continue;
+                    }
+                    
+                    BusinessEntity savedEntity = businessEntityRepository.save(entity);
+                    if (savedEntity != null && savedEntity.getId() != null) {
+                        savedCount++;
+                        if (savedCount % 10 == 0 || savedCount == 1) {
+                            log.info("현재까지 {}개 엔티티 저장 완료", savedCount);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.error("엔티티 저장 중 오류 발생: businessNumber={}, error={}", 
+                            entity.getBusinessNumber(), e.getMessage());
+                    // 개별 저장이므로 하나의 실패가 전체 트랜잭션을 롤백하지 않음
+                }
+            }
+            
+            log.info("데이터베이스 저장 완료. 총 {}개의 엔티티가 저장되었습니다.", savedCount);
+            return savedCount;
         } catch (Exception e) {
             log.error("비즈니스 엔티티 처리 중 오류 발생", e);
             return 0;
@@ -210,9 +226,7 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                         // 법인인 경우 DTO 생성
                         BusinessEntityDto dto = new BusinessEntityDto();
                         dto.setBusinessNumber(fields[3].trim());  // 사업자등록번호(D컬럼)
-                        
-                        // 주소 정보는 API에서 가져오므로 CSV에서 추출할 필요 없음
-                        
+
                         corporateEntities.add(dto);
                         log.debug("법인 엔티티 추가: 사업자등록번호={}", dto.getBusinessNumber());
                     }
@@ -234,10 +248,21 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
     
     /**
      * 필터링된 법인 정보를 외부 API를 통해 보강하고 저장할 엔티티로 변환합니다.
-     * 사업자등록번호로 API를 호출하여 통신판매번호와 법인등록번호를 조회합니다.
+     * 사업자등록번호로 API를 호출하여 통신판매번호, 상호명, 법인등록번호, 행정구역코드를 조회합니다.
      */
     private List<BusinessEntity> enrichAndPrepareEntities(List<BusinessEntityDto> dtos) {
         List<BusinessEntity> result = new ArrayList<>();
+        
+        // 중복 사업자등록번호 체크를 위한 Set
+        Set<String> processedBusinessNumbers = new HashSet<>();
+        
+        // 실패 원인 추적을 위한 카운터
+        Map<String, Integer> failureReasons = new HashMap<>();
+        failureReasons.put("이미 처리됨", 0);
+        failureReasons.put("DB에 이미 존재", 0);
+        failureReasons.put("API 결과 없음", 0);
+        failureReasons.put("필수 정보 누락", 0);
+        failureReasons.put("API 호출 오류", 0);
         
         // 병렬 처리를 위한 ExecutorService 생성
         ExecutorService executor = Executors.newFixedThreadPool(10);
@@ -247,22 +272,45 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
             List<CompletableFuture<BusinessEntity>> futures = dtos.stream()
                 .map(dto -> CompletableFuture.supplyAsync(() -> {
                     try {
-                        // API를 통해 사업자등록번호로 통신판매번호와 법인등록번호 조회
-                        Map<String, String> apiResult = getBusinessInfoByBusinessNumber(dto.getBusinessNumber());
+                        String businessNumber = dto.getBusinessNumber();
                         
-                        // API 결과가 없는 경우 건너뜀
-                        if (apiResult == null || apiResult.isEmpty()) {
-                            log.warn("API 결과 없음: businessNumber={}", dto.getBusinessNumber());
+                        // 이미 처리한 사업자등록번호인지 확인 (메모리 내 중복 체크)
+                        if (processedBusinessNumbers.contains(businessNumber)) {
+                            log.info("이미 처리된 사업자등록번호: {}, 건너뜁니다.", businessNumber);
+                            failureReasons.put("이미 처리됨", failureReasons.get("이미 처리됨") + 1);
                             return null;
                         }
                         
+                        // 데이터베이스에 이미 존재하는지 확인
+                        if (businessEntityRepository.existsByBusinessNumber(businessNumber)) {
+                            log.info("데이터베이스에 이미 존재하는 사업자등록번호: {}, 건너뜁니다.", businessNumber);
+                            processedBusinessNumbers.add(businessNumber); // 메모리에도 추가
+                            failureReasons.put("DB에 이미 존재", failureReasons.get("DB에 이미 존재") + 1);
+                            return null;
+                        }
+                        
+                        // API를 통해 사업자등록번호로 통신판매번호와 법인등록번호 조회
+                        Map<String, String> apiResult = getBusinessInfoByBusinessNumber(businessNumber);
+                        
+                        // API 결과가 없는 경우 건너뜀
+                        if (apiResult == null || apiResult.isEmpty()) {
+                            log.warn("API 결과 없음: businessNumber={}", businessNumber);
+                            failureReasons.put("API 결과 없음", failureReasons.get("API 결과 없음") + 1);
+                            return null;
+                        }
+                        
+                        // 필수 데이터 추출
                         String mailOrderSalesNumber = apiResult.get("mailOrderSalesNumber");
                         String companyName = apiResult.get("companyName");
                         String corporateRegistrationNumber = apiResult.get("corporateRegistrationNumber");
                         
                         // 필수 정보가 없는 경우 건너뜀
-                        if (mailOrderSalesNumber == null || corporateRegistrationNumber == null) {
-                            log.warn("필수 정보 누락: businessNumber={}", dto.getBusinessNumber());
+                        if (mailOrderSalesNumber == null || mailOrderSalesNumber.isEmpty() || 
+                            companyName == null || companyName.isEmpty() ||
+                            corporateRegistrationNumber == null || corporateRegistrationNumber.isEmpty()) {
+                            log.warn("필수 정보 누락: businessNumber={}, mailOrderSalesNumber={}, companyName={}, corporateRegistrationNumber={}", 
+                                    businessNumber, mailOrderSalesNumber, companyName, corporateRegistrationNumber);
+                            failureReasons.put("필수 정보 누락", failureReasons.get("필수 정보 누락") + 1);
                             return null;
                         }
                         
@@ -275,16 +323,24 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                             log.warn("행정구역코드 조회 실패, 임시 코드 생성: {}", administrativeDistrictCode);
                         }
                         
+                        // 처리된 사업자등록번호 목록에 추가
+                        processedBusinessNumbers.add(businessNumber);
+                        
                         // BusinessEntity 객체 생성
-                        return BusinessEntity.builder()
+                        BusinessEntity entity = BusinessEntity.builder()
                             .mailOrderSalesNumber(mailOrderSalesNumber)
                             .companyName(companyName)
-                            .businessNumber(dto.getBusinessNumber())
+                            .businessNumber(businessNumber)
                             .corporateRegistrationNumber(corporateRegistrationNumber)
                             .administrativeCode(administrativeDistrictCode)
                             .build();
+                        
+                        log.debug("엔티티 생성 완료: {}", entity);
+                        return entity;
                     } catch (Exception e) {
-                        log.error("엔티티 보강 중 오류 발생: {}", dto, e);
+                        log.error("엔티티 보강 중 오류 발생: businessNumber={}, error={}", 
+                                dto.getBusinessNumber(), e.getMessage());
+                        failureReasons.put("API 호출 오류", failureReasons.get("API 호출 오류") + 1);
                         return null;
                     }
                 }, executor))
@@ -298,9 +354,20 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                         result.add(entity);
                     }
                 } catch (Exception e) {
-                    log.error("Future 처리 중 오류 발생", e);
+                    log.error("Future 처리 중 오류 발생: {}", e.getMessage());
                 }
             }
+            
+            // 실패 원인 통계 로깅
+            log.info("=== 엔티티 보강 실패 원인 통계 ===");
+            for (Map.Entry<String, Integer> entry : failureReasons.entrySet()) {
+                if (entry.getValue() > 0) {
+                    log.info("{}: {}개", entry.getKey(), entry.getValue());
+                }
+            }
+            log.info("===============================");
+            
+            log.info("총 {}개의 엔티티 보강 완료", result.size());
         } finally {
             executor.shutdown();
         }
@@ -388,10 +455,18 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                                 result.put("mailOrderSalesNumber", mailOrderSalesNumber);
                             }
                             
-                            // 상호명(bsshNm) 추출
-                            String companyName = itemNode.path("bsshNm").asText();
+                            // 상호명(bzmnNm) 추출 - 기존의 bsshNm 대신 bzmnNm 사용
+                            String companyName = itemNode.path("bzmnNm").asText();
                             if (companyName != null && !companyName.isEmpty() && !"null".equals(companyName)) {
                                 result.put("companyName", companyName);
+                                log.info("상호명 추출 성공: {}", companyName);
+                            } else {
+                                // 대체 필드로 bsshNm 시도
+                                companyName = itemNode.path("bsshNm").asText();
+                                if (companyName != null && !companyName.isEmpty() && !"null".equals(companyName)) {
+                                    result.put("companyName", companyName);
+                                    log.info("대체 상호명(bsshNm) 추출 성공: {}", companyName);
+                                }
                             }
                             
                             // 법인등록번호(crno) 추출
