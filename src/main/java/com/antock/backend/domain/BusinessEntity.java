@@ -16,8 +16,8 @@ import lombok.NoArgsConstructor;
 @Builder
 public class BusinessEntity {
     @Id
-    private String businessRegistrationNumber; // 사업자등록번호
-    private String mailOrderNumber;          // 통신판매번호
+    private String businessNumber; // 사업자등록번호
+    private String mailOrderSalesNumber;          // 통신판매번호
     private String companyName;              // 상호
     private String corporateRegistrationNumber; // 법인등록번호
     private String administrativeCode;       // 행정구역코드
