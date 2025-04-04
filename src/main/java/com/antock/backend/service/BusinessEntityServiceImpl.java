@@ -86,29 +86,67 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
             
             // 4. 데이터베이스에 저장 (개별 저장으로 변경)
             int savedCount = 0;
+            List<String> failedToSaveBusinessNumbers = new ArrayList<>();
+            Map<String, String> failureReasons = new HashMap<>();
+            
             for (BusinessEntity entity : enrichedEntities) {
                 try {
                     // 중복 체크 한번 더 수행
                     if (businessEntityRepository.existsByBusinessNumber(entity.getBusinessNumber())) {
-                        log.info("저장 직전 중복 체크: 이미 존재하는 사업자등록번호 {}, 건너뜁니다.", entity.getBusinessNumber());
+                        log.debug("저장 직전 중복 체크: 이미 존재하는 사업자등록번호 {}, 건너뜁니다.", entity.getBusinessNumber());
+                        failedToSaveBusinessNumbers.add(entity.getBusinessNumber());
+                        failureReasons.put(entity.getBusinessNumber(), "DB에 이미 존재");
                         continue;
                     }
                     
                     BusinessEntity savedEntity = businessEntityRepository.save(entity);
                     if (savedEntity != null && savedEntity.getId() != null) {
                         savedCount++;
-                        if (savedCount % 10 == 0 || savedCount == 1) {
+                        if (savedCount % 50 == 0 || savedCount == 1) {
                             log.info("현재까지 {}개 엔티티 저장 완료", savedCount);
                         }
+                    } else {
+                        failedToSaveBusinessNumbers.add(entity.getBusinessNumber());
+                        failureReasons.put(entity.getBusinessNumber(), "저장 실패 (null 반환)");
+                        log.error("엔티티 저장 실패: {}", entity.getBusinessNumber());
                     }
                 } catch (Exception e) {
+                    failedToSaveBusinessNumbers.add(entity.getBusinessNumber());
+                    failureReasons.put(entity.getBusinessNumber(), "예외 발생: " + e.getMessage());
                     log.error("엔티티 저장 중 오류 발생: businessNumber={}, error={}", 
                             entity.getBusinessNumber(), e.getMessage());
                     // 개별 저장이므로 하나의 실패가 전체 트랜잭션을 롤백하지 않음
                 }
             }
             
-            log.info("데이터베이스 저장 완료. 총 {}개의 엔티티가 저장되었습니다.", savedCount);
+            // 저장에 실패한 사업자등록번호 로깅
+            if (!failedToSaveBusinessNumbers.isEmpty()) {
+                log.warn("=== DB 저장 실패 목록 ===");
+                log.warn("총 {}개 사업자등록번호 DB 저장 실패", failedToSaveBusinessNumbers.size());
+                
+                // 최대 20개까지만 상세 정보 표시
+                int displayCount = Math.min(failedToSaveBusinessNumbers.size(), 20);
+                for (int i = 0; i < displayCount; i++) {
+                    String businessNumber = failedToSaveBusinessNumbers.get(i);
+                    String reason = failureReasons.getOrDefault(businessNumber, "알 수 없는 이유");
+                    log.warn("  - 사업자등록번호: {}, 실패 이유: {}", businessNumber, reason);
+                }
+                
+                if (failedToSaveBusinessNumbers.size() > 20) {
+                    log.warn("  - 그 외 {}개 생략", failedToSaveBusinessNumbers.size() - 20);
+                }
+                log.warn("=======================");
+            }
+            
+            // 최종 결과 요약
+            log.info("=== 처리 결과 요약 ===");
+            log.info("CSV 파일 내 법인 수: {}", corporateEntities.size());
+            log.info("API 호출 성공 수: {}", enrichedEntities.size());
+            log.info("API 호출 실패 수: {}", corporateEntities.size() - enrichedEntities.size());
+            log.info("DB 저장 성공 수: {}", savedCount);
+            log.info("DB 저장 실패 수: {}", failedToSaveBusinessNumbers.size());
+            log.info("=====================");
+            
             return savedCount;
         } catch (Exception e) {
             log.error("비즈니스 엔티티 처리 중 오류 발생", e);
@@ -256,13 +294,21 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
         // 중복 사업자등록번호 체크를 위한 Set
         Set<String> processedBusinessNumbers = new HashSet<>();
         
-        // 실패 원인 추적을 위한 카운터
+        // 실패 원인 추적을 위한 카운터 및 실패한 사업자등록번호 목록
         Map<String, Integer> failureReasons = new HashMap<>();
+        Map<String, List<String>> failedBusinessNumbers = new HashMap<>();
+        
         failureReasons.put("이미 처리됨", 0);
         failureReasons.put("DB에 이미 존재", 0);
         failureReasons.put("API 결과 없음", 0);
         failureReasons.put("필수 정보 누락", 0);
         failureReasons.put("API 호출 오류", 0);
+        
+        failedBusinessNumbers.put("이미 처리됨", new ArrayList<>());
+        failedBusinessNumbers.put("DB에 이미 존재", new ArrayList<>());
+        failedBusinessNumbers.put("API 결과 없음", new ArrayList<>());
+        failedBusinessNumbers.put("필수 정보 누락", new ArrayList<>());
+        failedBusinessNumbers.put("API 호출 오류", new ArrayList<>());
         
         // 병렬 처리를 위한 ExecutorService 생성
         ExecutorService executor = Executors.newFixedThreadPool(10);
@@ -276,16 +322,18 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                         
                         // 이미 처리한 사업자등록번호인지 확인 (메모리 내 중복 체크)
                         if (processedBusinessNumbers.contains(businessNumber)) {
-                            log.info("이미 처리된 사업자등록번호: {}, 건너뜁니다.", businessNumber);
+                            log.debug("이미 처리된 사업자등록번호: {}, 건너뜁니다.", businessNumber);
                             failureReasons.put("이미 처리됨", failureReasons.get("이미 처리됨") + 1);
+                            failedBusinessNumbers.get("이미 처리됨").add(businessNumber);
                             return null;
                         }
                         
                         // 데이터베이스에 이미 존재하는지 확인
                         if (businessEntityRepository.existsByBusinessNumber(businessNumber)) {
-                            log.info("데이터베이스에 이미 존재하는 사업자등록번호: {}, 건너뜁니다.", businessNumber);
+                            log.debug("데이터베이스에 이미 존재하는 사업자등록번호: {}, 건너뜁니다.", businessNumber);
                             processedBusinessNumbers.add(businessNumber); // 메모리에도 추가
                             failureReasons.put("DB에 이미 존재", failureReasons.get("DB에 이미 존재") + 1);
+                            failedBusinessNumbers.get("DB에 이미 존재").add(businessNumber);
                             return null;
                         }
                         
@@ -296,6 +344,7 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                         if (apiResult == null || apiResult.isEmpty()) {
                             log.warn("API 결과 없음: businessNumber={}", businessNumber);
                             failureReasons.put("API 결과 없음", failureReasons.get("API 결과 없음") + 1);
+                            failedBusinessNumbers.get("API 결과 없음").add(businessNumber);
                             return null;
                         }
                         
@@ -311,6 +360,7 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                             log.warn("필수 정보 누락: businessNumber={}, mailOrderSalesNumber={}, companyName={}, corporateRegistrationNumber={}", 
                                     businessNumber, mailOrderSalesNumber, companyName, corporateRegistrationNumber);
                             failureReasons.put("필수 정보 누락", failureReasons.get("필수 정보 누락") + 1);
+                            failedBusinessNumbers.get("필수 정보 누락").add(businessNumber);
                             return null;
                         }
                         
@@ -341,6 +391,7 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                         log.error("엔티티 보강 중 오류 발생: businessNumber={}, error={}", 
                                 dto.getBusinessNumber(), e.getMessage());
                         failureReasons.put("API 호출 오류", failureReasons.get("API 호출 오류") + 1);
+                        failedBusinessNumbers.get("API 호출 오류").add(dto.getBusinessNumber());
                         return null;
                     }
                 }, executor))
@@ -358,15 +409,32 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                 }
             }
             
-            // 실패 원인 통계 로깅
-            log.info("=== 엔티티 보강 실패 원인 통계 ===");
+            // 실패 원인 통계 로깅 - 실패한 사업자등록번호 목록 포함
+            log.info("=== 실패 원인 통계 ===");
             for (Map.Entry<String, Integer> entry : failureReasons.entrySet()) {
                 if (entry.getValue() > 0) {
-                    log.info("{}: {}개", entry.getKey(), entry.getValue());
+                    String reason = entry.getKey();
+                    int count = entry.getValue();
+                    List<String> failedNumbers = failedBusinessNumbers.get(reason);
+                    
+                    log.info("{}: {}개", reason, count);
+                    
+                    // 실패한 사업자등록번호 목록 로깅 (최대 20개까지만 표시)
+                    if (!failedNumbers.isEmpty()) {
+                        int displayCount = Math.min(failedNumbers.size(), 20);
+                        String failedList = String.join(", ", failedNumbers.subList(0, displayCount));
+                        
+                        if (failedNumbers.size() > 20) {
+                            failedList += String.format(" 외 %d개", failedNumbers.size() - 20);
+                        }
+                        
+                        log.info("  - 실패한 사업자등록번호: {}", failedList);
+                    }
                 }
             }
             log.info("===============================");
             
+            // 성공 로그는 간결하게
             log.info("총 {}개의 엔티티 보강 완료", result.size());
         } finally {
             executor.shutdown();
@@ -459,13 +527,11 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                             String companyName = itemNode.path("bzmnNm").asText();
                             if (companyName != null && !companyName.isEmpty() && !"null".equals(companyName)) {
                                 result.put("companyName", companyName);
-                                log.info("상호명 추출 성공: {}", companyName);
                             } else {
                                 // 대체 필드로 bsshNm 시도
                                 companyName = itemNode.path("bsshNm").asText();
                                 if (companyName != null && !companyName.isEmpty() && !"null".equals(companyName)) {
                                     result.put("companyName", companyName);
-                                    log.info("대체 상호명(bsshNm) 추출 성공: {}", companyName);
                                 }
                             }
                             
@@ -473,31 +539,22 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                             String corporateRegistrationNumber = itemNode.path("crno").asText();
                             if (corporateRegistrationNumber != null && !corporateRegistrationNumber.isEmpty() && !"null".equals(corporateRegistrationNumber)) {
                                 result.put("corporateRegistrationNumber", corporateRegistrationNumber);
-                                log.info("법인등록번호 조회 성공: {}", corporateRegistrationNumber);
                             }
                             
                             // 도로명주소(rnAddr) 추출 - 행정구역코드 조회에 사용
                             String roadAddress = itemNode.path("rnAddr").asText();
                             if (roadAddress != null && !roadAddress.isEmpty() && !"null".equals(roadAddress) && !"N/A".equals(roadAddress)) {
                                 result.put("roadAddress", roadAddress);
-                                log.info("도로명주소 추출 성공: {}", roadAddress);
                                 
                                 // 도로명주소로 행정구역코드 조회
                                 String admCode = getAdministrativeDistrictCode(roadAddress);
                                 if (admCode != null && !admCode.isEmpty()) {
                                     result.put("administrativeCode", admCode);
-                                    log.info("행정구역코드 조회 성공: {}", admCode);
                                 }
                             }
                             
                             if (!result.isEmpty()) {
-                                log.info("사업자등록번호 {}로 조회 성공: 통신판매번호={}, 상호명={}, 법인등록번호={}, 도로명주소={}, 행정구역코드={}", 
-                                        businessRegistrationNumber, 
-                                        result.getOrDefault("mailOrderSalesNumber", "없음"),
-                                        result.getOrDefault("companyName", "없음"),
-                                        result.getOrDefault("corporateRegistrationNumber", "없음"),
-                                        result.getOrDefault("roadAddress", "없음"),
-                                        result.getOrDefault("administrativeCode", "없음"));
+                                // 상세 성공 로그 제거
                                 return result;
                             }
                         }
@@ -520,7 +577,6 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                     log.error("JSON 파싱 오류: {}", e.getMessage());
                     log.debug("응답 내용: {}", responseBody);
                     
-                    // HTML 응답에서도 호출 제한 관련 메시지 확인
                     if (responseBody != null && 
                         (responseBody.contains("LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR") || 
                          responseBody.contains("일일 제한 횟수") || 
@@ -568,16 +624,14 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
             
             // URI 객체 생성
             URI uri = builder.build().encode().toUri();
-            log.info("행정구역코드 조회 API 요청 URL: {}", uri);
-            
+
             // API 호출
             RestTemplate restTemplate = new RestTemplate();
             ResponseEntity<String> response = restTemplate.getForEntity(uri, String.class);
             
             if (response.getStatusCode().is2xxSuccessful()) {
                 String responseBody = response.getBody();
-                log.debug("행정구역코드 API 응답: {}", responseBody);
-                
+
                 // 응답이 HTML인지 확인 (에러 페이지일 수 있음)
                 if (responseBody != null && (responseBody.trim().startsWith("<") || responseBody.contains("<!DOCTYPE html>"))) {
                     log.error("행정구역코드 API가 HTML 응답을 반환했습니다. 응답: {}", 
@@ -602,10 +656,7 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                             // 첫 번째 결과의 행정구역코드(admCd) 추출
                             String admCd = jusoArray.get(0).path("admCd").asText();
                             
-                            if (admCd != null && !admCd.isEmpty()) {
-                                log.info("주소 [{}]에 대한 행정구역코드 조회 성공: {}", address, admCd);
-                                return admCd;
-                            }
+                            if (admCd != null && !admCd.isEmpty()) { return admCd; }
                         } else {
                             log.warn("주소 [{}]에 대한 검색 결과가 없습니다.", address);
                         }
