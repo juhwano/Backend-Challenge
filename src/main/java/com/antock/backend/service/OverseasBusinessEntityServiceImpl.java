@@ -2,7 +2,7 @@ package com.antock.backend.service;
 
 import com.antock.backend.domain.BusinessEntity;
 import com.antock.backend.dto.BusinessEntityDto;
-import com.antock.backend.repository.BusinessEntityRepository;
+import com.antock.backend.repository.BusinessEntityStorage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
@@ -24,11 +24,11 @@ import java.util.concurrent.CompletableFuture;
 @Slf4j
 @Service
 public class OverseasBusinessEntityServiceImpl implements OverseasBusinessEntityService {
-    private final BusinessEntityRepository businessEntityRepository;
+    private final BusinessEntityStorage businessEntityStorage;
     private final RestTemplate restTemplate;
 
-    public OverseasBusinessEntityServiceImpl(BusinessEntityRepository businessEntityRepository, RestTemplate restTemplate) {
-        this.businessEntityRepository = businessEntityRepository;
+    public OverseasBusinessEntityServiceImpl(BusinessEntityStorage businessEntityStorage, RestTemplate restTemplate) {
+        this.businessEntityStorage = businessEntityStorage;
         this.restTemplate = restTemplate;
     }
 
@@ -334,7 +334,7 @@ public class OverseasBusinessEntityServiceImpl implements OverseasBusinessEntity
                 }
                 
                 // 데이터베이스에 이미 존재하는지 확인 (통신판매번호 기준)
-                if (businessEntityRepository.existsByMailOrderSalesNumber(mailOrderSalesNumber)) {
+                if (businessEntityStorage.existsByMailOrderSalesNumber(mailOrderSalesNumber)) {
                     log.debug("데이터베이스에 이미 존재하는 통신판매번호: {}, 건너뜁니다.", mailOrderSalesNumber);
                     failureReasons.put("DB에 이미 존재", failureReasons.get("DB에 이미 존재") + 1);
                     failedEntities.get("DB에 이미 존재").add(mailOrderSalesNumber);
@@ -401,8 +401,8 @@ public class OverseasBusinessEntityServiceImpl implements OverseasBusinessEntity
             List<String> batch = allMailOrderSalesNumbers.subList(
                 i, Math.min(i + BATCH_SIZE, allMailOrderSalesNumbers.size()));
             
-            // 이미 존재하는 통신판매번호 조회
-            List<BusinessEntity> existingEntities = businessEntityRepository.findByMailOrderSalesNumberIn(batch);
+            // 이미 존재하는 통신판매번호 조회 - BusinessEntityRepository 대신 BusinessEntityStorage 사용
+            List<BusinessEntity> existingEntities = businessEntityStorage.findByMailOrderSalesNumberIn(batch);
             
             for (BusinessEntity entity : existingEntities) {
                 existingMailOrderSalesNumbers.add(entity.getMailOrderSalesNumber());
@@ -425,8 +425,8 @@ public class OverseasBusinessEntityServiceImpl implements OverseasBusinessEntity
                 i, Math.min(i + BATCH_SIZE, entitiesToSave.size()));
             
             try {
-                // 벌크 저장 (saveAll 메소드 사용)
-                List<BusinessEntity> savedEntities = businessEntityRepository.saveAll(batch);
+                // 벌크 저장 (saveAll 메소드 사용) - BusinessEntityRepository 대신 BusinessEntityStorage 사용
+                List<BusinessEntity> savedEntities = businessEntityStorage.saveAll(batch);
                 successCount += savedEntities.size();
                 
                 log.info("배치 저장 완료: {}/{} (현재/전체)", i + batch.size(), entitiesToSave.size());
@@ -436,7 +436,7 @@ public class OverseasBusinessEntityServiceImpl implements OverseasBusinessEntity
                 // 개별 저장 시도 (롤백 방지)
                 for (BusinessEntity entity : batch) {
                     try {
-                        businessEntityRepository.save(entity);
+                        businessEntityStorage.save(entity);
                         successCount++;
                     } catch (Exception ex) {
                         failCount++;

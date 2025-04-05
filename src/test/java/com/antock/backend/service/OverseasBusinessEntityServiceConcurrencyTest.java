@@ -1,7 +1,7 @@
 package com.antock.backend.service;
 
 import com.antock.backend.domain.BusinessEntity;
-import com.antock.backend.repository.BusinessEntityRepository;
+import com.antock.backend.repository.BusinessEntityStorage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -37,8 +37,12 @@ public class OverseasBusinessEntityServiceConcurrencyTest {
 
     private OverseasBusinessEntityService overseasBusinessEntityService;
 
+    // Remove this unused mock
+    // @Mock
+    // private BusinessEntityRepository businessEntityRepository;
+
     @Mock
-    private BusinessEntityRepository businessEntityRepository;
+    private BusinessEntityStorage businessEntityStorage;
 
     @Mock
     private RestTemplate restTemplate;
@@ -51,7 +55,8 @@ public class OverseasBusinessEntityServiceConcurrencyTest {
         // 테스트용 XLS 파일 생성
         mockXlsData = createMockXlsData();
 
-        overseasBusinessEntityService = new OverseasBusinessEntityServiceImpl(businessEntityRepository, restTemplate);
+        // BusinessEntityStorage 대신 Mock 객체 사용
+        overseasBusinessEntityService = new OverseasBusinessEntityServiceImpl(businessEntityStorage, restTemplate);
 
         // RestTemplate 모의 설정
         ResponseEntity<byte[]> mockResponse = new ResponseEntity<>(mockXlsData, HttpStatus.OK);
@@ -59,27 +64,26 @@ public class OverseasBusinessEntityServiceConcurrencyTest {
             .thenReturn(mockResponse);
 
         // 저장 메소드 모의 설정
-        when(businessEntityRepository.save(any(BusinessEntity.class))).thenAnswer(invocation -> {
+        when(businessEntityStorage.existsByMailOrderSalesNumber(anyString())).thenReturn(false);
+        when(businessEntityStorage.findByMailOrderSalesNumberIn(anyList())).thenReturn(new ArrayList<>());
+        when(businessEntityStorage.saveAll(anyList())).thenAnswer(invocation -> {
+            List<BusinessEntity> entities = invocation.getArgument(0);
+            List<BusinessEntity> savedEntities = new ArrayList<>();
+            
+            for (int i = 0; i < entities.size(); i++) {
+                BusinessEntity entity = entities.get(i);
+                setEntityId(entity, (long) (i + 1));
+                savedEntities.add(entity);
+            }
+            
+            return savedEntities;
+        });
+        
+        when(businessEntityStorage.save(any(BusinessEntity.class))).thenAnswer(invocation -> {
             BusinessEntity entity = invocation.getArgument(0);
-            // ID 설정 (실제 저장된 것처럼 시뮬레이션)
             setEntityId(entity, 1L);
             return entity;
         });
-
-        when(businessEntityRepository.saveAll(anyList())).thenAnswer(invocation -> {
-            List<BusinessEntity> entities = invocation.getArgument(0);
-            // 각 엔티티에 ID 설정
-            for (int i = 0; i < entities.size(); i++) {
-                setEntityId(entities.get(i), (long) (i + 1));
-            }
-            return entities;
-        });
-
-        // existsByMailOrderSalesNumber 메소드 모의 설정
-        when(businessEntityRepository.existsByMailOrderSalesNumber(anyString())).thenReturn(false);
-
-        // findByMailOrderSalesNumberIn 메소드 모의 설정
-        when(businessEntityRepository.findByMailOrderSalesNumberIn(anyList())).thenReturn(new ArrayList<>());
     }
 
     @Test
@@ -109,7 +113,7 @@ public class OverseasBusinessEntityServiceConcurrencyTest {
 
         // 검증
         assertTrue(completed, "모든 스레드가 시간 내에 완료되어야 합니다");
-        verify(businessEntityRepository, atLeastOnce()).saveAll(anyList());
+        verify(businessEntityStorage, atLeastOnce()).saveAll(anyList());
         
         // 중복 저장이 발생하지 않았는지 확인
         assertTrue(totalProcessed.get() > 0, "데이터가 처리되어야 합니다");
