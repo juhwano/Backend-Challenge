@@ -42,6 +42,12 @@ import java.util.stream.Collectors;
 public class DomesticBusinessEntityServiceImpl implements DomesticBusinessEntityService {
     private final BusinessEntityRepository businessEntityRepository;
     private final FtcCsvClient ftcCsvClient;
+
+    private RestTemplate restTemplate = new RestTemplate();
+
+    public void setRestTemplate(RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
+    }
     
     @Override
     @Transactional

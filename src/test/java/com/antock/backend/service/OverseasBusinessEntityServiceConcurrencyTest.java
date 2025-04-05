@@ -3,6 +3,7 @@ package com.antock.backend.service;
 import com.antock.backend.domain.BusinessEntity;
 import com.antock.backend.repository.BusinessEntityRepository;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -31,6 +32,7 @@ import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
+@DisplayName("국외 사업자 서비스 동시성 테스트")
 public class OverseasBusinessEntityServiceConcurrencyTest {
 
     private OverseasBusinessEntityService overseasBusinessEntityService;
@@ -80,10 +82,8 @@ public class OverseasBusinessEntityServiceConcurrencyTest {
         when(businessEntityRepository.findByMailOrderSalesNumberIn(anyList())).thenReturn(new ArrayList<>());
     }
 
-    /**
-     * 동시성 테스트: 여러 스레드가 동시에 같은 데이터를 처리할 때 중복 저장이 발생하지 않는지 확인
-     */
     @Test
+    @DisplayName("동시 처리 시 중복 저장 방지 테스트")
     public void testConcurrentProcessing() throws Exception {
         // 동시성 테스트를 위한 설정
         int threadCount = 5;
@@ -112,14 +112,11 @@ public class OverseasBusinessEntityServiceConcurrencyTest {
         verify(businessEntityRepository, atLeastOnce()).saveAll(anyList());
         
         // 중복 저장이 발생하지 않았는지 확인
-        // (실제 환경에서는 더 정교한 검증이 필요할 수 있음)
         assertTrue(totalProcessed.get() > 0, "데이터가 처리되어야 합니다");
     }
 
-    /**
-     * 대량 데이터 처리 성능 테스트
-     */
     @Test
+    @DisplayName("대량 데이터 처리 성능 테스트")
     public void testLargeDataProcessingPerformance() throws Exception {
         // 대량의 테스트 데이터 생성
         byte[] largeMockXlsData = createLargeMockXlsData(1000); // 1000개 데이터
@@ -143,13 +140,11 @@ public class OverseasBusinessEntityServiceConcurrencyTest {
         assertTrue(processed > 0, "데이터가 처리되어야 합니다");
         System.out.println("대량 데이터 처리 시간: " + duration + "ms, 처리된 항목 수: " + processed);
         
-        // 성능 기준 검증 (예: 10초 이내 처리)
+        // 성능 기준 검증 (10초 이내 처리)
         assertTrue(duration < 10000, "대량 데이터 처리가 10초 이내에 완료되어야 합니다");
     }
 
-    /**
-     * 엔티티에 ID 설정
-     */
+    //엔티티에 ID 설정
     private void setEntityId(BusinessEntity entity, Long id) {
         try {
             java.lang.reflect.Field idField = BusinessEntity.class.getDeclaredField("id");
@@ -160,9 +155,7 @@ public class OverseasBusinessEntityServiceConcurrencyTest {
         }
     }
 
-    /**
-     * 테스트용 XLS 파일 생성
-     */
+    //테스트용 XLS 파일 생성
     private byte[] createMockXlsData() throws Exception {
         // Apache POI를 사용하여 테스트용 XLS 파일 생성
         org.apache.poi.ss.usermodel.Workbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
@@ -197,9 +190,7 @@ public class OverseasBusinessEntityServiceConcurrencyTest {
         return bos.toByteArray();
     }
 
-    /**
-     * 대량의 테스트용 XLS 파일 생성
-     */
+    //대량의 테스트용 XLS 파일 생성
     private byte[] createLargeMockXlsData(int count) throws Exception {
         // Apache POI를 사용하여 대량의 테스트용 XLS 파일 생성
         org.apache.poi.ss.usermodel.Workbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook();

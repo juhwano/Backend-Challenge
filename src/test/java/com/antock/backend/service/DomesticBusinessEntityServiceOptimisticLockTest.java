@@ -2,6 +2,7 @@ package com.antock.backend.service;
 
 import com.antock.backend.domain.BusinessEntity;
 import com.antock.backend.repository.BusinessEntityRepository;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -18,12 +19,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
 @ActiveProfiles("test")
+@DisplayName("국내 사업자 서비스 낙관적 락 테스트")
 public class DomesticBusinessEntityServiceOptimisticLockTest {
 
     @Autowired
     private BusinessEntityRepository businessEntityRepository;
 
     @Test
+    @DisplayName("동시 수정 시 낙관적 락 예외 발생 테스트")
     public void testOptimisticLocking() throws Exception {
         // 테스트용 엔티티 생성
         BusinessEntity entity = BusinessEntity.builder()

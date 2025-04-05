@@ -35,7 +35,6 @@ import java.util.Map;
 @Component
 @RequiredArgsConstructor
 public class FtcCsvClient {
-    
     private static final String MAIN_URL = "https://www.ftc.go.kr/www/selectBizCommOpenList.do?key=255";
     
     // 시/도 코드 매핑
@@ -243,7 +242,7 @@ public class FtcCsvClient {
         
         try {
             // CSV 파일 읽기 (EUC-KR 인코딩 사용)
-            BufferedReader reader = new BufferedReader(new InputStreamReader(csvStream, "EUC-KR"));
+            BufferedReader reader = new BufferedReader(new InputStreamReader(csvStream, "UTF-8"));
             
             // 헤더 읽기
             String headerLine = reader.readLine();
