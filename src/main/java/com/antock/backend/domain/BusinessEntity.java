@@ -11,7 +11,6 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
-
 @Entity
 @Table(name = "business_entity")
 @Getter
@@ -37,6 +36,6 @@ public class BusinessEntity {
     @Column(name = "corporate_registration_number", nullable = false)
     private String corporateRegistrationNumber; // 법인등록번호
     
-    @Column(name = "administrative_code", nullable = false)
+    @Column(name = "administrative_code")
     private String administrativeCode; // 행정구역코드
 }

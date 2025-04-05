@@ -39,7 +39,6 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class BusinessEntityServiceImpl implements BusinessEntityService {
-    
     private final BusinessEntityRepository businessEntityRepository;
     private final FtcCsvClient ftcCsvClient;
     
@@ -367,10 +366,9 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                         // 행정구역코드 가져오기 (API에서 조회한 값 사용)
                         String administrativeDistrictCode = apiResult.get("administrativeCode");
                         
-                        // 행정구역코드가 없는 경우 임시 코드 생성
+                        // 행정구역코드가 없는 경우
                         if (administrativeDistrictCode == null || administrativeDistrictCode.isEmpty()) {
-                            administrativeDistrictCode = String.format("%05d", new Random().nextInt(100000));
-                            log.warn("행정구역코드 조회 실패, 임시 코드 생성: {}", administrativeDistrictCode);
+                            log.warn("행정구역코드 조회 실패, null 값을 사용합니다: businessNumber={}", businessNumber);
                         }
                         
                         // 처리된 사업자등록번호 목록에 추가
@@ -501,7 +499,7 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                     if (resultCode.isEmpty() && rootNode.has("resultCode")) {
                         resultCode = rootNode.path("resultCode").asText();
                     }
-                    
+
                     if ("00".equals(resultCode) || "NORMAL SERVICE".equals(rootNode.path("resultMsg").asText())) {
                         // 성공 응답인 경우 필요한 정보 추출
                         JsonNode itemsNode = rootNode.has("items") ? rootNode.path("items") : 
@@ -545,12 +543,14 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                             String roadAddress = itemNode.path("rnAddr").asText();
                             if (roadAddress != null && !roadAddress.isEmpty() && !"null".equals(roadAddress) && !"N/A".equals(roadAddress)) {
                                 result.put("roadAddress", roadAddress);
-                                
+
                                 // 도로명주소로 행정구역코드 조회
                                 String admCode = getAdministrativeDistrictCode(roadAddress);
                                 if (admCode != null && !admCode.isEmpty()) {
                                     result.put("administrativeCode", admCode);
                                 }
+                            } else if ("N/A".equals(roadAddress)) {
+                                log.warn("도로명주소가 'N/A'로 조회되어 행정구역코드를 조회하지 않습니다: businessNumber={}", businessRegistrationNumber);
                             }
                             
                             if (!result.isEmpty()) {
@@ -605,9 +605,9 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
      */
     private String getAdministrativeDistrictCode(String address) {
         try {
-            if (address == null || address.trim().isEmpty()) {
-                log.warn("주소가 비어있어 행정구역코드를 조회할 수 없습니다.");
-                return String.format("%05d", new Random().nextInt(100000)); // 임시 코드 반환
+            if (address == null || address.trim().isEmpty() || "N/A".equals(address)) {
+                log.warn("행정구역코드를 조회할 수 없습니다.");
+                return null;
             }
             
             // API URL 및 파라미터 설정
@@ -636,7 +636,7 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                 if (responseBody != null && (responseBody.trim().startsWith("<") || responseBody.contains("<!DOCTYPE html>"))) {
                     log.error("행정구역코드 API가 HTML 응답을 반환했습니다. 응답: {}", 
                             responseBody.substring(0, Math.min(responseBody.length(), 200)));
-                    return String.format("%05d", new Random().nextInt(100000)); // 임시 코드 반환
+                    return null;
                 }
                 
                 try {
@@ -655,6 +655,11 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                         if (jusoArray.isArray() && jusoArray.size() > 0) {
                             // 첫 번째 결과의 행정구역코드(admCd) 추출
                             String admCd = jusoArray.get(0).path("admCd").asText();
+
+                            if ("N/A".equals(admCd)) {
+                                log.warn("API에서 'N/A' 행정구역코드가 반환되었습니다.");
+                                return null;
+                            }
                             
                             if (admCd != null && !admCd.isEmpty()) { return admCd; }
                         } else {
@@ -671,11 +676,10 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                 log.error("행정구역코드 API 호출 실패: {}", response.getStatusCode());
             }
             
-            // API 호출 실패 시 임시 코드 반환
-            return String.format("%05d", new Random().nextInt(100000));
+            return null;
         } catch (Exception e) {
-            log.error("행정구역코드 조회 중 오류 발생: {}", address, e);
-            return String.format("%05d", new Random().nextInt(100000)); // 임시 코드 반환
+            log.error("행정구역코드 조회 중 오류 발생: {}", e.getMessage(), e);
+            return null;
         }
     }
     
