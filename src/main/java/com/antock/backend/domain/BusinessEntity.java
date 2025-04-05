@@ -30,12 +30,15 @@ public class BusinessEntity {
     @Column(name = "company_name", nullable = false)
     private String companyName; // 상호
     
-    @Column(name = "business_number", nullable = false, unique = true)
+    @Column(name = "business_number", unique = true)
     private String businessNumber; // 사업자등록번호
     
-    @Column(name = "corporate_registration_number", nullable = false)
+    @Column(name = "corporate_registration_number")
     private String corporateRegistrationNumber; // 법인등록번호
     
     @Column(name = "administrative_code")
     private String administrativeCode; // 행정구역코드
+
+    @Column(name = "is_overseas")
+    private boolean isOverseas; // 해외사업자 여부
 }

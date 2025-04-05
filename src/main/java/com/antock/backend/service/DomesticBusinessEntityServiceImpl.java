@@ -27,26 +27,24 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
-import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+// Update the class declaration to implement DomesticBusinessEntityService
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class BusinessEntityServiceImpl implements BusinessEntityService {
+public class DomesticBusinessEntityServiceImpl implements DomesticBusinessEntityService {
     private final BusinessEntityRepository businessEntityRepository;
     private final FtcCsvClient ftcCsvClient;
     
     @Override
     @Transactional
     public int processBusinessEntities(String city, String district) {
-        log.info("Processing business entities for city: {}, district: {}", city, district);
-        
+
         try {
             // 1. CSV 파일 다운로드
             InputStream csvStream = ftcCsvClient.downloadCsvFile(city, district);
@@ -265,7 +263,7 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                         dto.setBusinessNumber(fields[3].trim());  // 사업자등록번호(D컬럼)
 
                         corporateEntities.add(dto);
-                        log.debug("법인 엔티티 추가: 사업자등록번호={}", dto.getBusinessNumber());
+//                        log.debug("법인 엔티티 추가: 사업자등록번호={}", dto.getBusinessNumber());
                     }
                 } catch (Exception e) {
                     log.warn("라인 파싱 중 오류 발생: {}, 오류: {}", line, e.getMessage());
@@ -383,7 +381,6 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                             .administrativeCode(administrativeDistrictCode)
                             .build();
                         
-                        log.debug("엔티티 생성 완료: {}", entity);
                         return entity;
                     } catch (Exception e) {
                         log.error("엔티티 보강 중 오류 발생: businessNumber={}, error={}", 
@@ -408,8 +405,8 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
             }
             
             // 실패 원인 통계 로깅 - 실패한 사업자등록번호 목록 포함
-            log.info("=== 실패 원인 통계 ===");
             for (Map.Entry<String, Integer> entry : failureReasons.entrySet()) {
+                log.info("=== 실패 원인 통계 ===");
                 if (entry.getValue() > 0) {
                     String reason = entry.getKey();
                     int count = entry.getValue();
@@ -463,8 +460,6 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
                     "&resultType=json" + 
                     "&brno=" + formattedBusinessNumber;
             
-            log.info("API 요청 URL: {}", urlString);
-            
             // String URL을 URI 객체로 변환 (추가 인코딩 방지)
             URI uri = new URI(urlString);
             
@@ -476,9 +471,6 @@ public class BusinessEntityServiceImpl implements BusinessEntityService {
             
             if (response.getStatusCode().is2xxSuccessful()) {
                 String responseBody = response.getBody();
-                
-                // Log the full response for debugging
-                log.debug("API 응답 전체: {}", responseBody);
                 
                 // 응답이 HTML인지 확인 (에러 페이지일 수 있음)
                 if (responseBody != null && (responseBody.trim().startsWith("<") || responseBody.contains("<!DOCTYPE html>"))) {

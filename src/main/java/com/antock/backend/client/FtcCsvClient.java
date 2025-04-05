@@ -232,12 +232,12 @@ public class FtcCsvClient {
      * 멀티쓰레드를 활용하여 병렬 처리합니다.
      */
     public List<Map<String, String>> downloadAndFilterCorporations(String city, String district) {
-        log.info("Downloading and filtering corporations for city: {}, district: {}", city, district);
+        log.info("국내사업자 CSV 파일 다운로드 시작");
         
         // CSV 파일 다운로드
         InputStream csvStream = downloadCsvFile(city, district);
         if (csvStream == null) {
-            log.error("Failed to download CSV file");
+            log.error("국내사업자 CSV 파일 다운로드 실패");
             return Collections.emptyList();
         }
         

@@ -11,4 +11,9 @@ public interface BusinessEntityRepository extends JpaRepository<BusinessEntity, 
      * 사업자등록번호로 엔티티 존재 여부 확인
      */
     boolean existsByBusinessNumber(String businessNumber);
+    
+    /**
+     * 통신판매번호로 엔티티 존재 여부 확인
+     */
+    boolean existsByMailOrderSalesNumber(String mailOrderSalesNumber);
 }

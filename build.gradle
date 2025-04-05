@@ -41,6 +41,9 @@ dependencies {
 	// 문자 인코딩
 	implementation 'com.googlecode.juniversalchardet:juniversalchardet:1.0.3'
 
+	implementation 'org.apache.poi:poi:5.2.3'
+	implementation 'org.apache.poi:poi-ooxml:5.2.3'
+
 	// test
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
