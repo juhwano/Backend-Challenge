@@ -1,22 +1,19 @@
 package com.antock.backend.service;
 
+import com.antock.backend.client.ApiClient;
 import com.antock.backend.domain.BusinessEntity;
 import com.antock.backend.repository.BusinessEntityStorage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
 
-import java.io.ByteArrayInputStream;
-import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -37,15 +34,11 @@ public class OverseasBusinessEntityServiceConcurrencyTest {
 
     private OverseasBusinessEntityService overseasBusinessEntityService;
 
-    // Remove this unused mock
-    // @Mock
-    // private BusinessEntityRepository businessEntityRepository;
-
     @Mock
     private BusinessEntityStorage businessEntityStorage;
 
     @Mock
-    private RestTemplate restTemplate;
+    private RestTemplate restTemplate;  // ApiClient 대신 RestTemplate 사용
 
     // 테스트용 XLS 파일 데이터
     private byte[] mockXlsData;
@@ -55,13 +48,17 @@ public class OverseasBusinessEntityServiceConcurrencyTest {
         // 테스트용 XLS 파일 생성
         mockXlsData = createMockXlsData();
 
-        // BusinessEntityStorage 대신 Mock 객체 사용
+        // RestTemplate과 BusinessEntityStorage를 사용하는 서비스 생성
         overseasBusinessEntityService = new OverseasBusinessEntityServiceImpl(businessEntityStorage, restTemplate);
 
-        // RestTemplate 모의 설정
-        ResponseEntity<byte[]> mockResponse = new ResponseEntity<>(mockXlsData, HttpStatus.OK);
-        when(restTemplate.exchange(anyString(), any(), any(), eq(byte[].class)))
-            .thenReturn(mockResponse);
+        // RestTemplate 모의 설정 (ApiClient 대신)
+        // 여기서는 OverseasBusinessEntityServiceImpl이 RestTemplate을 사용한다고 가정
+        when(restTemplate.exchange(
+            anyString(), 
+            any(), 
+            any(), 
+            eq(byte[].class)
+        )).thenReturn(new org.springframework.http.ResponseEntity<>(mockXlsData, org.springframework.http.HttpStatus.OK));
 
         // 저장 메소드 모의 설정
         when(businessEntityStorage.existsByMailOrderSalesNumber(anyString())).thenReturn(false);
@@ -120,15 +117,40 @@ public class OverseasBusinessEntityServiceConcurrencyTest {
     }
 
     @Test
+    @DisplayName("API 출처 변경 테스트")
+    public void testApiSourceChange() throws Exception {
+        // 초기 API 호출 테스트
+        int initialProcessed = overseasBusinessEntityService.processBusinessEntities("국외사업자", "테스트");
+        assertTrue(initialProcessed > 0, "초기 데이터가 처리되어야 합니다");
+        
+        // API 출처 변경 시뮬레이션 (다른 데이터 준비)
+        byte[] newMockData = createLargeMockXlsData(20); // 20개 데이터로 변경
+        when(restTemplate.exchange(
+            anyString(), 
+            any(), 
+            any(), 
+            eq(byte[].class)
+        )).thenReturn(new org.springframework.http.ResponseEntity<>(newMockData, org.springframework.http.HttpStatus.OK));
+        
+        // 변경된 API로 다시 호출
+        int newProcessed = overseasBusinessEntityService.processBusinessEntities("국외사업자", "테스트");
+        assertTrue(newProcessed > 0, "변경된 API의 데이터가 처리되어야 합니다");
+        assertEquals(20, newProcessed, "변경된 API에서 20개 데이터가 처리되어야 합니다");
+    }
+
+    @Test
     @DisplayName("대량 데이터 처리 성능 테스트")
     public void testLargeDataProcessingPerformance() throws Exception {
         // 대량의 테스트 데이터 생성
         byte[] largeMockXlsData = createLargeMockXlsData(1000); // 1000개 데이터
         
         // RestTemplate 응답 재설정
-        ResponseEntity<byte[]> mockResponse = new ResponseEntity<>(largeMockXlsData, HttpStatus.OK);
-        when(restTemplate.exchange(anyString(), any(), any(), eq(byte[].class)))
-            .thenReturn(mockResponse);
+        when(restTemplate.exchange(
+            anyString(), 
+            any(), 
+            any(), 
+            eq(byte[].class)
+        )).thenReturn(new org.springframework.http.ResponseEntity<>(largeMockXlsData, org.springframework.http.HttpStatus.OK));
 
         // 성능 측정 시작
         long startTime = System.currentTimeMillis();
@@ -148,7 +170,7 @@ public class OverseasBusinessEntityServiceConcurrencyTest {
         assertTrue(duration < 10000, "대량 데이터 처리가 10초 이내에 완료되어야 합니다");
     }
 
-    //엔티티에 ID 설정
+    // 엔티티에 ID 설정하는 메서드 추가
     private void setEntityId(BusinessEntity entity, Long id) {
         try {
             java.lang.reflect.Field idField = BusinessEntity.class.getDeclaredField("id");
@@ -159,7 +181,7 @@ public class OverseasBusinessEntityServiceConcurrencyTest {
         }
     }
 
-    //테스트용 XLS 파일 생성
+    // 테스트용 XLS 파일 생성 메서드 추가
     private byte[] createMockXlsData() throws Exception {
         // Apache POI를 사용하여 테스트용 XLS 파일 생성
         org.apache.poi.ss.usermodel.Workbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
@@ -194,7 +216,7 @@ public class OverseasBusinessEntityServiceConcurrencyTest {
         return bos.toByteArray();
     }
 
-    //대량의 테스트용 XLS 파일 생성
+    // 대량의 테스트용 XLS 파일 생성 메서드 추가
     private byte[] createLargeMockXlsData(int count) throws Exception {
         // Apache POI를 사용하여 대량의 테스트용 XLS 파일 생성
         org.apache.poi.ss.usermodel.Workbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook();

@@ -1,5 +1,6 @@
 package com.antock.backend.service;
 
+import com.antock.backend.client.ApiClient;
 import com.antock.backend.domain.BusinessEntity;
 import com.antock.backend.dto.BusinessEntityDto;
 import com.antock.backend.repository.BusinessEntityStorage;

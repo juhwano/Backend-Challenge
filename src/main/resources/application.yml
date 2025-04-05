@@ -23,3 +23,10 @@ logging:
     org.hibernate.type.descriptor.sql: off
     com.antock.backend: debug
     org.springframework: INFO
+
+# 기존 설정에 추가
+api:
+  urls:
+    overseas-business: http://localhost:8080/v1/business
+    corporate-registration: https://apis.data.go.kr/1130000/MllBsDtl_2Service/getMllBsInfoDetail_2
+    administrative-district: https://business.juso.go.kr/addrlink/addrLinkApi.do
