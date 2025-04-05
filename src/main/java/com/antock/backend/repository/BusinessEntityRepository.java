@@ -2,6 +2,7 @@ package com.antock.backend.repository;
 
 import com.antock.backend.domain.BusinessEntity;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -13,4 +14,6 @@ public interface BusinessEntityRepository extends JpaRepository<BusinessEntity, 
     boolean existsByMailOrderSalesNumber(String mailOrderSalesNumber);
     
     List<BusinessEntity> findByMailOrderSalesNumberIn(List<String> mailOrderSalesNumbers);
+
+    Optional<BusinessEntity> findByBusinessNumber(String businessNumber);
 }

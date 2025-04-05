@@ -10,9 +10,11 @@ import java.net.URI;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -107,11 +109,53 @@ public class DomesticBusinessEntityServiceImpl implements DomesticBusinessEntity
                         failureReasons.put(entity.getBusinessNumber(), "저장 실패 (null 반환)");
                         log.error("엔티티 저장 실패: {}", entity.getBusinessNumber());
                     }
+                } catch (OptimisticLockingFailureException ole) {
+                    // 낙관적 락 충돌 발생 시 재시도 로직
+                    int maxRetries = 3;
+                    int retryCount = 0;
+                    boolean saved = false;
+
+                    while (retryCount < maxRetries && !saved) {
+                        try {
+                            log.warn("낙관적 락 충돌 발생: businessNumber={}, 재시도 {}/{}",
+                                entity.getBusinessNumber(), retryCount + 1, maxRetries);
+
+                            // 최신 엔티티 조회 (있는 경우)
+                            Optional<BusinessEntity> refreshedEntity = businessEntityRepository
+                                .findByBusinessNumber(entity.getBusinessNumber());
+
+                            if (refreshedEntity.isPresent()) {
+                                // 이미 존재하는 경우 - 중복으로 간주하고 넘어감
+                                log.info("재시도 중 이미 저장된 엔티티 발견: businessNumber={}",
+                                    entity.getBusinessNumber());
+                                saved = true;
+                            } else {
+                                // 다시 저장 시도
+                                businessEntityRepository.save(entity);
+                                log.info("재시도 성공: businessNumber={}", entity.getBusinessNumber());
+                                saved = true;
+                            }
+                        } catch (OptimisticLockingFailureException retryEx) {
+                            retryCount++;
+                            if (retryCount >= maxRetries) {
+                                failedToSaveBusinessNumbers.add(entity.getBusinessNumber());
+                                failureReasons.put(entity.getBusinessNumber(), "낙관적 락 충돌 최대 재시도 횟수 초과");
+                                log.error("낙관적 락 충돌 최대 재시도 횟수 초과: businessNumber={}",
+                                    entity.getBusinessNumber());
+                            }
+                            // 재시도 전 짧은 대기 시간 추가
+                            try {
+                                Thread.sleep(100 * retryCount); // 점진적으로 대기 시간 증가
+                            } catch (InterruptedException ie) {
+                                Thread.currentThread().interrupt();
+                            }
+                        }
+                    }
                 } catch (Exception e) {
                     failedToSaveBusinessNumbers.add(entity.getBusinessNumber());
                     failureReasons.put(entity.getBusinessNumber(), "예외 발생: " + e.getMessage());
-                    log.error("엔티티 저장 중 오류 발생: businessNumber={}, error={}", 
-                            entity.getBusinessNumber(), e.getMessage());
+                    log.error("엔티티 저장 중 오류 발생: businessNumber={}, error={}",
+                        entity.getBusinessNumber(), e.getMessage());
                     // 개별 저장이므로 하나의 실패가 전체 트랜잭션을 롤백하지 않음
                 }
             }
@@ -747,13 +791,18 @@ public class DomesticBusinessEntityServiceImpl implements DomesticBusinessEntity
     }
     
     /**
-     * 비동기로 CSV 파일을 처리합니다. (멀티쓰레드 활용)
-     * 실제 구현 시 사용할 메서드입니다.
+     * 비동기로 CSV 파일을 처리합니다.
      */
     @Override
-    @Async
+    @Async("taskExecutor")
     public CompletableFuture<Integer> processBusinessEntitiesAsync(String city, String district) {
-        int result = processBusinessEntities(city, district);
-        return CompletableFuture.completedFuture(result);
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return processBusinessEntities(city, district);
+            } catch (Exception e) {
+                log.error("비동기 처리 중 오류 발생: {}", e.getMessage(), e);
+                return 0;
+            }
+        });
     }
 }
