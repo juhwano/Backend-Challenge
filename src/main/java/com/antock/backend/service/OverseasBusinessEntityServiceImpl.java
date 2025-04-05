@@ -3,6 +3,8 @@ package com.antock.backend.service;
 import com.antock.backend.domain.BusinessEntity;
 import com.antock.backend.dto.BusinessEntityDto;
 import com.antock.backend.repository.BusinessEntityRepository;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -124,20 +126,21 @@ public class OverseasBusinessEntityServiceImpl implements OverseasBusinessEntity
     }
 
     private List<BusinessEntityDto> parseOverseasXls(InputStream excelStream) {
-        List<BusinessEntityDto> overseasEntities = new ArrayList<>();
-
+        // 동시성 문제를 방지하기 위해 ConcurrentHashMap 사용
+        List<BusinessEntityDto> overseasEntities = Collections.synchronizedList(new ArrayList<>());
+    
         try {
             // POI 라이브러리를 사용하여 엑셀 파일 파싱
             org.apache.poi.ss.usermodel.Workbook workbook = org.apache.poi.ss.usermodel.WorkbookFactory.create(excelStream);
             org.apache.poi.ss.usermodel.Sheet sheet = workbook.getSheetAt(0); // 첫 번째 시트 사용
-
+    
             // 헤더 행 읽기 (첫 번째 행)
             org.apache.poi.ss.usermodel.Row headerRow = sheet.getRow(0);
             if (headerRow == null) {
                 log.error("XLS 파일에 헤더 행이 없습니다.");
                 return overseasEntities;
             }
-
+    
             // 헤더 필드 매핑
             Map<String, Integer> fieldIndexMap = new HashMap<>();
             for (int i = 0; i < headerRow.getLastCellNum(); i++) {
@@ -147,100 +150,110 @@ public class OverseasBusinessEntityServiceImpl implements OverseasBusinessEntity
                     fieldIndexMap.put(headerName, i);
                 }
             }
-
-//            log.debug("엑셀 헤더 필드: {}", fieldIndexMap.keySet());
-
+    
             // 필수 필드 인덱스 확인
             Integer managementNoIndex = fieldIndexMap.getOrDefault("관리번호", -1);
             Integer companyNameIndex = fieldIndexMap.getOrDefault("법인명(상호)", -1);
             Integer businessNumberIndex = fieldIndexMap.getOrDefault("사업자번호", -1);
             Integer corporationIndex = fieldIndexMap.getOrDefault("법인여부", -1);
             Integer statusIndex = fieldIndexMap.getOrDefault("운영상태", -1);
-
+    
             // 필수 필드가 없는 경우 처리
             if (managementNoIndex == -1 || companyNameIndex == -1 || corporationIndex == -1 || statusIndex == -1) {
                 log.error("필수 필드가 파일에 없습니다. 관리번호: {}, 법인명: {}, 법인여부: {}, 운영상태: {}",
                     managementNoIndex, companyNameIndex, corporationIndex, statusIndex);
                 return overseasEntities;
             }
-
-//            log.debug("필드 인덱스 - 관리번호: {}, 법인명: {}, 사업자번호: {}, 법인여부: {}, 운영상태: {}",
-//                managementNoIndex, companyNameIndex, businessNumberIndex, corporationIndex, statusIndex);
-
-            // 데이터 행 읽기 (두 번째 행부터)
-            int totalRows = 0;
-            int errorRows = 0;
-            int filteredOut = 0;
-
-            for (int rowIndex = 1; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
-                org.apache.poi.ss.usermodel.Row row = sheet.getRow(rowIndex);
-                if (row == null) continue;
-
-                totalRows++;
-                try {
-                    // 법인여부 확인 (Y인 경우만 처리)
-                    String isCorporation = getCellValueAsString(row.getCell(corporationIndex));
-                    if (!"Y".equals(isCorporation)) {
-                        filteredOut++;
-                        continue;
-                    }
-
-                    // 운영상태 확인 (01인 경우만 처리)
-                    String operationStatus = getCellValueAsString(row.getCell(statusIndex));
-                    if (!"01".equals(operationStatus)) {
-                        filteredOut++;
-                        continue;
-                    }
-
-                    // 필수 필드 값 추출
-                    String managementNo = getCellValueAsString(row.getCell(managementNoIndex));
-                    String companyName = getCellValueAsString(row.getCell(companyNameIndex));
-
-                    // 필수 정보 확인
-                    if (managementNo.isEmpty() || companyName.isEmpty()) {
-                        log.warn("필수 정보 누락 (행 {}): 관리번호={}, 법인명={}",
-                            rowIndex, managementNo, companyName);
-                        errorRows++;
-                        continue;
-                    }
-
-                    // 국외사업자 DTO 생성
-                    BusinessEntityDto dto = new BusinessEntityDto();
-                    dto.setMailOrderSalesNumber(managementNo);  // 관리번호
-                    dto.setCompanyName(companyName);          // 법인명(상호)
-
-                    // 사업자번호 (있는 경우)
-                    if (businessNumberIndex != -1) {
-                        String businessNumber = getCellValueAsString(row.getCell(businessNumberIndex));
-
-                        if (!businessNumber.isEmpty()) {
-                            dto.setBusinessNumber(businessNumber);
+    
+            // 병렬 처리를 위한 설정
+            int totalRows = sheet.getLastRowNum();
+            int availableProcessors = Runtime.getRuntime().availableProcessors();
+            int batchSize = Math.max(100, totalRows / (availableProcessors * 2)); // 적절한 배치 크기 계산
+            
+            // 원자적 카운터 사용
+            java.util.concurrent.atomic.AtomicInteger errorRows = new java.util.concurrent.atomic.AtomicInteger(0);
+            java.util.concurrent.atomic.AtomicInteger filteredOut = new java.util.concurrent.atomic.AtomicInteger(0);
+            java.util.concurrent.atomic.AtomicInteger processedRows = new java.util.concurrent.atomic.AtomicInteger(0);
+            
+            log.info("병렬 처리 시작: 총 행 수={}, 프로세서 수={}, 배치 크기={}", totalRows, availableProcessors, batchSize);
+            
+            // 병렬 스트림을 사용하여 데이터 처리
+            List<CompletableFuture<Void>> futures = new ArrayList<>();
+            
+            for (int startRow = 1; startRow <= totalRows; startRow += batchSize) {
+                final int start = startRow;
+                final int end = Math.min(startRow + batchSize - 1, totalRows);
+                
+                CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                    for (int rowIndex = start; rowIndex <= end; rowIndex++) {
+                        org.apache.poi.ss.usermodel.Row row = sheet.getRow(rowIndex);
+                        if (row == null) continue;
+                        
+                        processedRows.incrementAndGet();
+                        try {
+                            // 법인여부 확인 (Y인 경우만 처리)
+                            String isCorporation = getCellValueAsString(row.getCell(corporationIndex));
+                            if (!"Y".equals(isCorporation)) {
+                                filteredOut.incrementAndGet();
+                                continue;
+                            }
+    
+                            // 운영상태 확인 (01인 경우만 처리)
+                            String operationStatus = getCellValueAsString(row.getCell(statusIndex));
+                            if (!"01".equals(operationStatus)) {
+                                filteredOut.incrementAndGet();
+                                continue;
+                            }
+    
+                            // 필수 필드 값 추출
+                            String managementNo = getCellValueAsString(row.getCell(managementNoIndex));
+                            String companyName = getCellValueAsString(row.getCell(companyNameIndex));
+    
+                            // 필수 정보 확인
+                            if (managementNo.isEmpty() || companyName.isEmpty()) {
+                                log.warn("필수 정보 누락 (행 {}): 관리번호={}, 법인명={}",
+                                    rowIndex, managementNo, companyName);
+                                errorRows.incrementAndGet();
+                                continue;
+                            }
+    
+                            // 국외사업자 DTO 생성
+                            BusinessEntityDto dto = new BusinessEntityDto();
+                            dto.setMailOrderSalesNumber(managementNo);  // 관리번호
+                            dto.setCompanyName(companyName);          // 법인명(상호)
+    
+                            // 사업자번호 (있는 경우)
+                            if (businessNumberIndex != -1) {
+                                String businessNumber = getCellValueAsString(row.getCell(businessNumberIndex));
+                                if (!businessNumber.isEmpty()) {
+                                    dto.setBusinessNumber(businessNumber);
+                                }
+                            }
+    
+                            // 동기화된 리스트에 추가
+                            overseasEntities.add(dto);
+                        } catch (Exception e) {
+                            log.warn("행 파싱 중 오류 발생 (행 {}): 오류: {}", rowIndex, e.getMessage());
+                            errorRows.incrementAndGet();
                         }
                     }
-
-                    overseasEntities.add(dto);
-
-                    // 처음 몇 개의 엔티티 샘플 상세 로깅
-//                    if (overseasEntities.size() <= 5) {
-//                        log.debug("국외사업자 엔티티 추가 (샘플): 통신판매번호={}, 상호명={}, 사업자번호={}",
-//                            dto.getMailOrderSalesNumber(), dto.getCompanyName(), dto.getBusinessNumber());
-//                    }
-
-                } catch (Exception e) {
-                    log.warn("행 파싱 중 오류 발생 (행 {}): 오류: {}", rowIndex, e.getMessage());
-                    errorRows++;
-                }
+                });
+                
+                futures.add(future);
             }
-
+            
+            // 모든 비동기 작업이 완료될 때까지 대기
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+    
             log.info("국외사업자 XLS 파일 파싱 완료. 총 행 수: {}, 오류 행 수: {}, 필터링된 행 수: {}, 추출된 국외사업자 수: {}",
-                totalRows, errorRows, filteredOut, overseasEntities.size());
-
+                processedRows.get(), errorRows.get(), filteredOut.get(), overseasEntities.size());
+    
             workbook.close();
-
+    
         } catch (Exception e) {
             log.error("국외사업자 XLS 파일 파싱 중 오류 발생: {}", e.getMessage(), e);
         }
-
+    
         return overseasEntities;
     }
 
@@ -363,44 +376,79 @@ public class OverseasBusinessEntityServiceImpl implements OverseasBusinessEntity
     }
     
     /**
-     * 엔티티를 데이터베이스에 저장
+     * 엔티티를 데이터베이스에 벌크 저장
      */
     private int saveEntitiesToDatabase(List<BusinessEntity> entities) {
         int successCount = 0;
         int failCount = 0;
-        Map<String, String> failureReasons = new HashMap<>();
+        Map<String, String> failureReasons = new ConcurrentHashMap<>();
         
-        for (BusinessEntity entity : entities) {
-            try {
-                // 저장 직전 중복 체크 (동시성 문제 방지)
-                if (businessEntityRepository.existsByMailOrderSalesNumber(entity.getMailOrderSalesNumber())) {
-                    log.debug("저장 직전 중복 체크: 이미 존재하는 통신판매번호 {}, 건너뜁니다.", entity.getMailOrderSalesNumber());
-                    failCount++;
-                    failureReasons.put(entity.getMailOrderSalesNumber(), "DB에 이미 존재");
-                    continue;
-                }
-                
-                BusinessEntity savedEntity = businessEntityRepository.save(entity);
-                
-                if (savedEntity != null && savedEntity.getId() != null) {
-                    successCount++;
-                    
-                    // 로깅 간격 조절 (100개마다 로그)
-                    if (successCount % 100 == 0 || successCount == 1) {
-                        log.info("현재까지 {}개 국외사업자 엔티티 저장 완료", successCount);
-                    }
-                } else {
-                    log.warn("저장 실패 (null 반환)");
-                    failCount++;
-                    failureReasons.put(entity.getMailOrderSalesNumber(), "저장 실패");
-                }
-            } catch (Exception e) {
-                log.error("국외사업자 엔티티 저장 중 오류 발생: mailOrderSalesNumber={}, error={}", 
-                        entity.getMailOrderSalesNumber(), e.getMessage());
-                failCount++;
-                failureReasons.put(entity.getMailOrderSalesNumber(), e.getMessage());
+        // 벌크 저장을 위한 배치 크기 설정
+        final int BATCH_SIZE = 100;
+        
+        // 중복 체크를 위한 Set (이미 존재하는 통신판매번호)
+        Set<String> existingMailOrderSalesNumbers = Collections.synchronizedSet(new HashSet<>());
+        
+        // 모든 통신판매번호 추출
+        List<String> allMailOrderSalesNumbers = entities.stream()
+            .map(BusinessEntity::getMailOrderSalesNumber)
+            .collect(Collectors.toList());
+        
+        log.info("총 {}개 엔티티에 대한 중복 체크 시작", allMailOrderSalesNumbers.size());
+        
+        // 배치로 나누어 중복 체크 (데이터베이스 부하 감소)
+        for (int i = 0; i < allMailOrderSalesNumbers.size(); i += BATCH_SIZE) {
+            List<String> batch = allMailOrderSalesNumbers.subList(
+                i, Math.min(i + BATCH_SIZE, allMailOrderSalesNumbers.size()));
+            
+            // 이미 존재하는 통신판매번호 조회
+            List<BusinessEntity> existingEntities = businessEntityRepository.findByMailOrderSalesNumberIn(batch);
+            
+            for (BusinessEntity entity : existingEntities) {
+                existingMailOrderSalesNumbers.add(entity.getMailOrderSalesNumber());
+                failureReasons.put(entity.getMailOrderSalesNumber(), "DB에 이미 존재");
             }
         }
+        
+        log.info("중복 체크 완료. 이미 존재하는 통신판매번호: {}개", existingMailOrderSalesNumbers.size());
+        
+        // 저장할 엔티티 필터링 (이미 존재하는 것 제외)
+        List<BusinessEntity> entitiesToSave = entities.stream()
+            .filter(entity -> !existingMailOrderSalesNumbers.contains(entity.getMailOrderSalesNumber()))
+            .collect(Collectors.toList());
+        
+        log.info("저장할 엔티티: {}개", entitiesToSave.size());
+        
+        // 배치 단위로 저장
+        for (int i = 0; i < entitiesToSave.size(); i += BATCH_SIZE) {
+            List<BusinessEntity> batch = entitiesToSave.subList(
+                i, Math.min(i + BATCH_SIZE, entitiesToSave.size()));
+            
+            try {
+                // 벌크 저장 (saveAll 메소드 사용)
+                List<BusinessEntity> savedEntities = businessEntityRepository.saveAll(batch);
+                successCount += savedEntities.size();
+                
+                log.info("배치 저장 완료: {}/{} (현재/전체)", i + batch.size(), entitiesToSave.size());
+            } catch (Exception e) {
+                log.error("배치 저장 중 오류 발생: {}", e.getMessage(), e);
+                
+                // 개별 저장 시도 (롤백 방지)
+                for (BusinessEntity entity : batch) {
+                    try {
+                        businessEntityRepository.save(entity);
+                        successCount++;
+                    } catch (Exception ex) {
+                        failCount++;
+                        failureReasons.put(entity.getMailOrderSalesNumber(), ex.getMessage());
+                        log.warn("개별 저장 실패: {}, 이유: {}", entity.getMailOrderSalesNumber(), ex.getMessage());
+                    }
+                }
+            }
+        }
+        
+        // 이미 존재하는 항목 처리
+        failCount += existingMailOrderSalesNumbers.size();
         
         // 저장 결과 로깅
         logSaveResults(successCount, failCount, entities, failureReasons);
