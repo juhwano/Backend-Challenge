@@ -58,3 +58,35 @@
 - Driver Class: `org.h2.Driver`
 - JDBC URL:  `jdbc:h2:mem:antockdb`
 - User Name: `sa`
+
+<br/><br/>
+
+### API 요청 방법
+#### POST 요청
+
+- **URL:** `http://localhost:8080/v1/business`
+- **Method:** `POST`
+- **Body:**
+  ```json
+  {
+    "city": "경상남도",
+    "district": "의령군"
+  }
+  ```
+
+- **설명:**
+  - 위 요청은 [공정거래위원회 사업자등록현황](https://www.ftc.go.kr/www/selectBizCommOpenList.do?key=255#n) 사이트에서 시/도 선택 (예: `경상남도`)과 전체 (예: `의령군`)에 해당하는 값을 넣어서 요청합니다.
+
+- **응답:**
+- **성공 응답:**
+  ```json
+  {
+    "processedCount": 81,
+    "message": "데이터가 성공적으로 처리되었습니다."
+  }
+  ```
+
+  - **processedCount:** 처리된 데이터 항목 수
+  - **message:** 처리 결과 메시지
+
+- 서버는 해당 시/도와 군/구에 해당하는 사업자 정보를 처리한 후, 처리된 데이터 수와 메시지를 반환합니다.
