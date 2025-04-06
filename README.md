@@ -3,7 +3,7 @@
 - [개발 환경](#개발-환경)
 - [빌드 및 실행하기](#빌드-및-실행하기)
 - [기능 요구사항](#기능-요구사항)
-- [아키텍쳐](#아키텍처)
+- [폴더 구조](#폴더-구조)
 - [데이터베이스 접근방법](#데이터베이스-접근방법)
 - [API](#api)
 - [결과](#결과)
@@ -42,8 +42,6 @@ $ cd Backend-Challenge
 java -jar build/libs/backend-0.0.1-SNAPSHOT.jar
 ```
 
-- 접속 Base URI: `http://localhost:8080`
-
 <br/><br/>
 
 ## 기능 요구사항
@@ -64,7 +62,7 @@ java -jar build/libs/backend-0.0.1-SNAPSHOT.jar
 
 <br/><br/>
 
-## 프로젝트 구조
+## 폴더 구조
 
 ```plaintext
 ├── .git/                      # Git 저장소
@@ -100,22 +98,6 @@ java -jar build/libs/backend-0.0.1-SNAPSHOT.jar
 
 
 
-<br/><br/>
-
-## 아키텍처
-1. 컨트롤러 계층 (Controller Layer)
-   - 클라이언트 요청을 처리하고 응답을 반환
-   - REST API 엔드포인트 정의
-2. 서비스 계층 (Service Layer)
-   - 비즈니스 로직 처리
-   - 트랜잭션 관리
-3. 저장소 계층 (Repository Layer)
-   - 데이터 영속성 관리 
-   - JPA 기반 데이터 조작
-5. 도메인 계층 (Domain Layer)
-   - 비즈니스 엔티티 정의
-6. 클라이언트 계층 (Client Layer)
-   - 외부 API 통신 담당
 
 <br/><br/>
 
