@@ -1,6 +1,70 @@
-# 기술 과제
+# 기술 과제 - REST API 개발
+## 목차
+- [개발 환경](#개발-환경)
+- [빌드 및 실행하기](#빌드-및-실행하기)
+- [기능 요구사항](#기능-요구사항)
+- [아키텍쳐](#아키텍처)
+- [데이터베이스 접근방법](#데이터베이스-접근방법)
+- [API](#api)
+- [결과](#결과)
 
-### 프로젝트 구조
+<br/><br/>
+
+## 개발 환경
+- 기본 환경
+    - IDE: IntelliJ IDEA Ultimate
+    - OS: Mac
+    - GIT
+- Server
+    - Java 17
+    - Spring Boot 3.4.2
+    - Spring Data JPA
+    - H2 Database
+    - Gradle 8.13
+    - JUnit 5
+- 라이브러리 및 도구
+    - Lombok
+    - Swagger/OpenAPI (springdoc-openapi-starter-webmvc-ui 2.3.0)
+    - Apache POI 5.2.3 (Excel 파일 처리)
+    - OpenCSV 5.9 (CSV 파일 처리)
+    - Selenium 4.1.2 (웹 자동화)
+
+<br/><br/>
+
+## 빌드 및 실행하기
+### 터미널 환경
+- Git, Java 는 설치되어 있다고 가정한다.
+
+```
+$ git clone https://github.com/juhwano/Backend-Challenge.git
+$ cd Backend-Challenge
+./gradlew clean build
+java -jar build/libs/backend-0.0.1-SNAPSHOT.jar
+```
+
+- 접속 Base URI: `http://localhost:8080`
+
+<br/><br/>
+
+## 기능 요구사항
+### 필수사항
+- POST 요청을 처리하는 REST API 개발
+- 공공데이터포털 사이트에서 CSV,XLS 파일 다운로드 및 데이터 필터링
+- 공공데이터포털 API/공공주소 API를 통한 추가 데이터 조회
+- 데이터 정제 후 DB에 저장
+- 테스트코드 작성
+  
+### 고려사항
+- API 출처 변경에 대응 가능한 유연한 설계
+- 저장소 변경에 대응 가능한 추상화된 저장소 계층
+- 멀티쓰레드를 활용한 병렬 처리로 성능 최적화
+- 동시성 문제를 해결하는 안전한 구현
+- 유지보수가 용이한 로깅 처리
+
+
+<br/><br/>
+
+## 프로젝트 구조
 
 ```plaintext
 ├── .git/                      # Git 저장소
@@ -34,9 +98,11 @@
                 └── service/                      # 서비스 단위 테스트
 ```
 
+
+
 <br/><br/>
 
-### 아키텍처 (계층 구조)
+## 아키텍처
 1. 컨트롤러 계층 (Controller Layer)
    - 클라이언트 요청을 처리하고 응답을 반환
    - REST API 엔드포인트 정의
@@ -44,16 +110,16 @@
    - 비즈니스 로직 처리
    - 트랜잭션 관리
 3. 저장소 계층 (Repository Layer)
-   - 데이터 접근 로직
+   - 데이터 영속성 관리 
    - JPA 기반 데이터 조작
-4. 도메인 계층 (Domain Layer)
+5. 도메인 계층 (Domain Layer)
    - 비즈니스 엔티티 정의
-5. 클라이언트 계층 (Client Layer)
+6. 클라이언트 계층 (Client Layer)
    - 외부 API 통신 담당
 
 <br/><br/>
 
-### 데이터베이스 접근방법 (H2)
+## 데이터베이스 접근방법
 - Access URL: [http://localhost:8080/h2-console](http://localhost:8080/h2-console)
 - Driver Class: `org.h2.Driver`
 - JDBC URL:  `jdbc:h2:mem:antockdb`
@@ -61,37 +127,33 @@
 
 <br/><br/>
 
-### API 요청 방법
-#### POST 요청
-
-- **URL:** `http://localhost:8080/v1/business`
-- **Method:** `POST`
-- **Body:**
+## API
+[Request]
+- URL: `http://localhost:8080/v1/business`
+- Method: `POST`
+- Body:
   ```json
   {
     "city": "경상남도",
     "district": "의령군"
   }
   ```
+- 설명: 위 요청은 [공정거래위원회 사업자등록현황](https://www.ftc.go.kr/www/selectBizCommOpenList.do?key=255#n) 사이트에서 시/도 선택 (예: `경상남도`)과 전체 (예: `의령군`)에 해당하는 값을 넣어서 요청합니다.
 
-- **설명:**
-  - 위 요청은 [공정거래위원회 사업자등록현황](https://www.ftc.go.kr/www/selectBizCommOpenList.do?key=255#n) 사이트에서 시/도 선택 (예: `경상남도`)과 전체 (예: `의령군`)에 해당하는 값을 넣어서 요청합니다.
-
-- **성공 응답:**
+[Response]
   ```json
   {
     "processedCount": 81,
     "message": "데이터가 성공적으로 처리되었습니다."
   }
   ```
-
-  - **processedCount:** 처리된 데이터 항목 수
-  - **message:** 처리 결과 메시지
+  - processedCount: 처리된 데이터 항목 수
+  - message: 처리 결과 메시지
 
 - 서버는 해당 시/도와 군/구에 해당하는 사업자 정보를 처리한 후, 처리된 데이터 수와 메시지를 반환합니다.
 
 <br/><br/>
 
-### 결과
+## 결과
 ![스크린샷 2025-04-05 23 23 38](https://github.com/user-attachments/assets/908b89a2-110a-4ee6-ad87-dc2fadaea092)
 
