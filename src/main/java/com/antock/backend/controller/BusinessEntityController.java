@@ -20,7 +20,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/v1/business")
 @RequiredArgsConstructor
 public class BusinessEntityController {
-    // Change from BusinessEntityService to DomesticBusinessEntityService
     private final DomesticBusinessEntityService domesticBusinessEntityService;
     private final OverseasBusinessEntityService overseasBusinessEntityService;
 

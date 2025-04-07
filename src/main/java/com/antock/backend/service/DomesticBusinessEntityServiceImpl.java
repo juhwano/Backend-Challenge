@@ -802,13 +802,14 @@ public class DomesticBusinessEntityServiceImpl implements DomesticBusinessEntity
     @Override
     @Async("taskExecutor")
     public CompletableFuture<Integer> processBusinessEntitiesAsync(String city, String district) {
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                return processBusinessEntities(city, district);
-            } catch (Exception e) {
-                log.error("비동기 처리 중 오류 발생: {}", e.getMessage(), e);
-                return 0;
-            }
-        });
+        try {
+            int result = processBusinessEntities(city, district);
+            return CompletableFuture.completedFuture(result);
+        } catch (Exception e) {
+            log.error("비동기 처리 중 오류 발생: {}", e.getMessage(), e);
+            CompletableFuture<Integer> future = new CompletableFuture<>();
+            future.completeExceptionally(e);
+            return future;
+        }
     }
 }

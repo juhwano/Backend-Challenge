@@ -495,6 +495,14 @@ public class OverseasBusinessEntityServiceImpl implements OverseasBusinessEntity
     @Override
     @Async("taskExecutor")
     public CompletableFuture<Integer> processBusinessEntitiesAsync(String country, String additionalInfo) {
-        return CompletableFuture.supplyAsync(() -> processBusinessEntities(country, additionalInfo));
+        try {
+            int result = processBusinessEntities(country, additionalInfo);
+            return CompletableFuture.completedFuture(result);
+        } catch (Exception e) {
+            log.error("비동기 처리 중 오류 발생: {}", e.getMessage(), e);
+            CompletableFuture<Integer> future = new CompletableFuture<>();
+            future.completeExceptionally(e);
+            return future;
+        }
     }
 }
