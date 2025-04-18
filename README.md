@@ -36,8 +36,8 @@
 - Git, Java 는 설치되어 있다고 가정한다.
 
 ```
-$ git clone https://github.com/juhwano/backend-challenge.git
-$ cd backend-challenge
+$ git clone https://github.com/juhwano/backend-challenge-api-1.git
+$ cd backend-challenge-api-1
 ./gradlew clean build
 java -jar build/libs/backend-0.0.1-SNAPSHOT.jar
 ```
